@@ -18,11 +18,11 @@ get_config() {
     grep "^$key" "$CONFIG_FILE" | head -n 1 | cut -d '=' -f2- | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
 }
 
-# -- Fonction de mise à jour générique (compatible Linux/macOS) --
-# Utilise le délimiteur '|' pour éviter les conflits avec les '/' des URLs
+# -- Fonction de mise à jour générique --
 update_config_key() {
     key=$1
     value=$2
+    # Utilisation de | comme séparateur pour éviter les conflits avec les / des URLs
     if [[ "$OSTYPE" == "darwin"* ]]; then
         sed -i '' "s|^$key[[:space:]]*=.*|$key = $value|" "$CONFIG_FILE"
     else
@@ -30,7 +30,7 @@ update_config_key() {
     fi
 }
 
-# Lecture de la config
+# Lecture de la config initiale
 SERVER_URL=$(get_config "SERVER_URL")
 TOKEN=$(get_config "TOKEN")
 NAMESPACE=$(get_config "DEFAULT_NAMESPACE")
@@ -54,7 +54,7 @@ fi
 # LOGIQUE
 # ==============================================================================
 
-# Vérifie et demande les infos manquantes (URL ou Token)
+# Vérifie et demande les infos manquantes (URL, Token, Namespace)
 ensure_config_exists() {
     local updated=0
 
@@ -70,17 +70,34 @@ ensure_config_exists() {
 
     # 2. Vérification du Token
     if [ -z "$TOKEN" ]; then
-        if [ $updated -eq 1 ]; then echo ""; fi # Juste pour l'esthétique
+        if [ $updated -eq 1 ]; then echo ""; fi
         echo "⚠️  Le Token est manquant dans config.ini."
         echo -n "👉 Veuillez saisir votre Token (ex: sha256~...) : "
         read -r TOKEN
         if [ -z "$TOKEN" ]; then echo "❌ Token obligatoire."; exit 1; fi
         update_config_key "TOKEN" "$TOKEN"
+        updated=1
+    fi
+
+    # 3. Vérification du Namespace
+    if [ -z "$NAMESPACE" ]; then
+        if [ $updated -eq 1 ]; then echo ""; fi
+        echo "⚠️  Le Namespace par défaut n'est pas défini."
+        echo -n "👉 Entrez le namespace (ou Appuyez sur Entrée pour ignorer) : "
+        read -r INPUT_NS
+        
+        if [ ! -z "$INPUT_NS" ]; then
+            # Si l'utilisateur a saisi quelque chose, on sauvegarde et on met à jour la variable
+            update_config_key "DEFAULT_NAMESPACE" "$INPUT_NS"
+            NAMESPACE="$INPUT_NS"
+        else
+            echo "   Aucun namespace défini pour cette session."
+        fi
     fi
 }
 
 do_login() {
-    # On s'assure d'abord d'avoir les infos
+    # On s'assure d'abord d'avoir toutes les infos
     ensure_config_exists
 
     echo "🔌 Connexion à $SERVER_URL..."
