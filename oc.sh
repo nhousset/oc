@@ -4,94 +4,115 @@
 # CONFIGURATION ET UTILITAIRES
 # ==============================================================================
 
-# Chemin vers le fichier config.ini (dans le même dossier que ce script)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_FILE="$SCRIPT_DIR/config.ini"
 
-# Vérification de la présence du fichier de configuration
 if [ ! -f "$CONFIG_FILE" ]; then
     echo "Erreur : Fichier $CONFIG_FILE introuvable."
     exit 1
 fi
 
-# Fonction pour lire une valeur dans config.ini
+# -- Fonction de lecture d'une clé --
 get_config() {
     key=$1
     grep "^$key" "$CONFIG_FILE" | head -n 1 | cut -d '=' -f2- | sed 's/^[[:space:]]*//;s/[[:space:]]*$//'
 }
 
-# Fonction pour mettre à jour le token dans config.ini
-update_token_in_config() {
-    new_token=$1
-    # Échappement des caractères spéciaux si nécessaire (basique pour sed)
-    # On utilise une syntaxe compatible Linux (sed -i) et macOS (sed -i '')
+# -- Fonction de mise à jour générique (compatible Linux/macOS) --
+# Utilise le délimiteur '|' pour éviter les conflits avec les '/' des URLs
+update_config_key() {
+    key=$1
+    value=$2
     if [[ "$OSTYPE" == "darwin"* ]]; then
-        sed -i '' "s|^TOKEN[[:space:]]*=.*|TOKEN = $new_token|" "$CONFIG_FILE"
+        sed -i '' "s|^$key[[:space:]]*=.*|$key = $value|" "$CONFIG_FILE"
     else
-        sed -i "s|^TOKEN[[:space:]]*=.*|TOKEN = $new_token|" "$CONFIG_FILE"
+        sed -i "s|^$key[[:space:]]*=.*|$key = $value|" "$CONFIG_FILE"
     fi
 }
 
-# Lecture des configurations initiales
+# Lecture de la config
 SERVER_URL=$(get_config "SERVER_URL")
 TOKEN=$(get_config "TOKEN")
 NAMESPACE=$(get_config "DEFAULT_NAMESPACE")
 SKIP_TLS=$(get_config "INSECURE_SKIP_TLS_VERIFY")
 OC_PATH=$(get_config "OC_EXECUTABLE_PATH")
 
-# Détermination de la commande oc
+# Définition de l'exécutable
 if [ -z "$OC_PATH" ]; then
     OC_CMD="oc"
 else
     OC_CMD="$OC_PATH"
 fi
 
-# Options de sécurité
+# Options TLS
 TLS_OPTIONS=""
 if [ "$SKIP_TLS" == "true" ]; then
     TLS_OPTIONS="--insecure-skip-tls-verify=true"
 fi
 
 # ==============================================================================
-# LOGIQUE PRINCIPALE
+# LOGIQUE
 # ==============================================================================
 
+# Vérifie et demande les infos manquantes (URL ou Token)
+ensure_config_exists() {
+    local updated=0
+
+    # 1. Vérification de l'URL
+    if [ -z "$SERVER_URL" ]; then
+        echo "⚠️  L'URL du serveur est manquante dans config.ini."
+        echo -n "👉 Veuillez saisir l'URL du cluster (ex: https://api.cluster...:6443) : "
+        read -r SERVER_URL
+        if [ -z "$SERVER_URL" ]; then echo "❌ URL obligatoire."; exit 1; fi
+        update_config_key "SERVER_URL" "$SERVER_URL"
+        updated=1
+    fi
+
+    # 2. Vérification du Token
+    if [ -z "$TOKEN" ]; then
+        if [ $updated -eq 1 ]; then echo ""; fi # Juste pour l'esthétique
+        echo "⚠️  Le Token est manquant dans config.ini."
+        echo -n "👉 Veuillez saisir votre Token (ex: sha256~...) : "
+        read -r TOKEN
+        if [ -z "$TOKEN" ]; then echo "❌ Token obligatoire."; exit 1; fi
+        update_config_key "TOKEN" "$TOKEN"
+    fi
+}
+
 do_login() {
-    echo " Tentative de connexion à $SERVER_URL..."
+    # On s'assure d'abord d'avoir les infos
+    ensure_config_exists
+
+    echo "🔌 Connexion à $SERVER_URL..."
     
-    # Première tentative de connexion
-    # On capture la sortie d'erreur pour ne pas polluer l'écran si on gère l'erreur nous-mêmes,
-    # ou on laisse passer pour que l'utilisateur voit pourquoi ça échoue.
+    # Tentative de connexion silencieuse
     "$OC_CMD" login "$SERVER_URL" --token="$TOKEN" $TLS_OPTIONS > /dev/null 2>&1
     
     if [ $? -eq 0 ]; then
-        echo "✅ Connexion réussie avec le token actuel."
+        echo "✅ Connexion réussie."
         switch_namespace
     else
         echo "❌ Échec de la connexion (Token expiré ou invalide)."
-        echo "   Veuillez entrer un nouveau token."
-        echo -n "   Nouveau Token : "
+        echo "👉 Veuillez saisir un NOUVEAU token :"
         read -r NEW_TOKEN
 
         if [ -z "$NEW_TOKEN" ]; then
-            echo "   Aucun token saisi. Abandon."
+            echo "   Annulé."
             exit 1
         fi
 
-        echo "   Mise à jour de config.ini..."
-        update_token_in_config "$NEW_TOKEN"
-        
-        # Mise à jour de la variable pour la commande suivante
+        # Mise à jour et nouvelle tentative
+        update_config_key "TOKEN" "$NEW_TOKEN"
         TOKEN="$NEW_TOKEN"
 
-        echo "   Nouvelle tentative de connexion..."
+        echo "🔄 Nouvelle tentative..."
         "$OC_CMD" login "$SERVER_URL" --token="$TOKEN" $TLS_OPTIONS
         
         if [ $? -eq 0 ]; then
-            echo "✅ Connexion réussie et token sauvegardé."
+            echo "✅ Connexion réussie et config.ini mis à jour."
             switch_namespace
         else
-            echo "❌ Toujours impossible de se connecter. Vérifiez l'URL ou le token."
+            echo "❌ Erreur fatale. Vérifiez l'URL ou vos droits d'accès."
             exit 1
         fi
     fi
@@ -99,18 +120,18 @@ do_login() {
 
 switch_namespace() {
     if [ ! -z "$NAMESPACE" ]; then
-        echo "👉 Activation du namespace : $NAMESPACE"
+        echo "📂 Activation du namespace : $NAMESPACE"
         "$OC_CMD" project "$NAMESPACE"
     fi
 }
 
 do_logout() {
-    echo "Déconnexion..."
+    echo "👋 Déconnexion..."
     "$OC_CMD" logout
 }
 
 # ==============================================================================
-# POINT D'ENTRÉE
+# MAIN
 # ==============================================================================
 
 case "$1" in
@@ -122,9 +143,6 @@ case "$1" in
         ;;
     *)
         echo "Usage: $0 {login|logout}"
-        echo "Exemple:"
-        echo "  $0 login   -> Connecte (et demande le token si expiré)"
-        echo "  $0 logout  -> Déconnecte"
         exit 1
         ;;
 esac
