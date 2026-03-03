@@ -13,34 +13,34 @@
 # Liste de tous les plug-ins à installer
 PLUGINS="audit authorization batch cas common-analytics compute configuration credentials dagentsrv dcmtransfer decisiongitdeploy detection detection-definition detection-message-schema folders fonts identities job launcher licenses listdata migrationmanagement mip-migration models notifications oauth reports rfc-solution-config rtdmobjectmigration scoreexecution sid-functions transfer visual-forecasting workload-orchestrator"
 
-echo "====================================================="
-echo "   Installation des plug-ins SAS Viya CLI"
-echo "====================================================="
-echo ""
+echo "=== Démarrage de l'installation des plugins SAS Viya ==="
 
-# 1. Demander le chemin vers sas-viya
-read -p "Veuillez indiquer le chemin complet vers le dossier contenant 'sas-viya' (ex: /opt/sas/viya/home/bin) : " SAS_VIYA_DIR
-
-# Correction si l'utilisateur a pointé directement vers le fichier au lieu du dossier
-if [[ -f "$SAS_VIYA_DIR" && "$SAS_VIYA_DIR" == *"sas-viya" ]]; then
-    SAS_VIYA_DIR=$(dirname "$SAS_VIYA_DIR")
-fi
-
-# 2. Vérifier que l'exécutable existe bien à cet endroit
-if [ ! -x "$SAS_VIYA_DIR/sas-viya" ]; then
-    echo "❌ Erreur : L'exécutable 'sas-viya' est introuvable ou n'a pas les droits d'exécution dans le dossier : $SAS_VIYA_DIR"
+# 1. Vérification de l'exécutable local et affichage de la version
+if [ -x "./sas-viya" ]; then
+    echo "Exécutable local trouvé. Version installée :"
+    ./sas-viya -v
+else
+    echo "❌ Erreur : ./sas-viya est introuvable ou n'est pas exécutable dans ce dossier."
+    echo "Assure-toi d'être dans le bon répertoire (actuellement : $(pwd))."
     exit 1
 fi
 
-# 3. Vérifier si sas-viya est déjà dans le PATH, sinon l'ajouter
-if ! command -v sas-viya &> /dev/null; then
-    echo "⚠️  'sas-viya' n'est pas détecté dans votre variable PATH."
-    echo "👉 Ajout temporaire au PATH pour cette session..."
-    export PATH="$SAS_VIYA_DIR:$PATH"
+echo "-------------------------------------------------------"
+
+# 2. Boucle d'installation pour chaque plugin
+for plugin in $PLUGINS; do
+    echo -n "Installation du plugin '$plugin'... "
     
-    echo ""
-    echo "💡 Astuce : Pour l'ajouter de façon permanente à votre système, exécutez cette commande plus tard :"
-    echo "   echo 'export PATH=\"$SAS_VIYA_DIR:\$PATH\"' >> ~/.bashrc && source ~/.bashrc"
-    echo ""
-else
-    echo "✅ 'sas-viya'
+    # Lancement de l'installation en silencieux
+    ./sas-viya plugins install --repo SAS "$plugin" > /dev/null 2>&1
+    
+    # Vérification du code de retour
+    if [ $? -eq 0 ]; then
+        echo "✅ OK"
+    else
+        echo "❌ ERREUR"
+    fi
+done
+
+echo "-------------------------------------------------------"
+echo "=== Fin des installations ==="
